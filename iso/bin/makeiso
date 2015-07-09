@@ -1,0 +1,49 @@
+#!/bin/bash
+
+version=$1
+
+config="${PWD}/isolinux.cfg/isolinux.cfg.$version"
+
+if [[ ! -e $config ]]; then
+
+  echo "$config doesn't exist"
+  exit 1
+
+fi
+
+isoname=$(grep '## ISO: ' $config)
+
+if [[ -z $isoname ]]; then
+
+  isoname="${version}.iso"
+
+fi
+
+isoname=${isoname##* }
+
+host=$(hostname)
+
+if [ "x$host" == 'xvr.vwh.net' ]; then
+  dest_dir='/home/www/files/iso'
+elif [ "x$host" == 'xsweetums' ]; then
+  dest_dir='/home/harleypig/Downloads'
+elif [[ -n $ISO_DEST_DIR ]]; then
+  dest_dir=$ISO_DEST_DIR
+else
+  echo "Don't know where to save iso ..."
+  exit 1
+fi
+
+dest="${dest_dir}/${isoname}.iso"
+
+sudo cp -f $config ${PWD}/iso_root/isolinux/isolinux.cfg
+sudo chown root.root ${PWD}/iso_root/isolinux/isolinux.cfg
+
+sudo mkisofs -R -J -T -v \
+  -b isolinux/isolinux.bin \
+  -c isolinux/boot.cat \
+  -no-emul-boot \
+  -boot-load-size 4 \
+  -boot-info-table \
+  -o $dest \
+  iso_root

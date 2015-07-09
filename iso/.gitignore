@@ -1,0 +1,4 @@
+*.iso
+mount_*
+iso_root/*
+work

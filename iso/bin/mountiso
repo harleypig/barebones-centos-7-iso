@@ -1,0 +1,50 @@
+#!/bin/bash
+
+WHICH=$(basename $0)
+
+iso=$1
+shift
+
+if [[ ! -e $iso  ]]; then
+
+  echo "$iso does not exist"
+  exit 1
+
+fi
+
+mountpoint="mount_${iso%.iso}"
+
+if [[ "x${WHICH}" = "xmountiso" ]]; then
+
+  sudo mkdir -p ${PWD}/$mountpoint
+  sudo mount -o loop $iso ${PWD}/$mountpoint
+
+elif [[ "x${WHICH}" = "xumountiso" ]]; then
+
+  sudo umount ${PWD}/$mountpoint
+  sudo rmdir ${PWD}/$mountpoint
+
+elif [[ "x${WHICH}" = "xupdateisoroot" ]]; then
+
+  rsync="sudo rsync -aviHSc --del --numeric-ids ${PWD}/$mountpoint/ ${PWD}/iso_root/"
+
+  doit=$1
+
+  if [[ "x${doit}" = "xdoit" ]]; then
+
+    $rsync
+    sudo rm -f ${PWD}/iso_root/isolinux/splash.*
+    sudo cp -f ${PWD}/splash.jpg ${PWD}/iso_root/isolinux/splash.jpg
+
+  else
+
+    $rsync --dry-run
+
+  fi
+
+else
+
+  echo "Don't know what to do for $0"
+  exit 1
+
+fi

@@ -1,0 +1,32 @@
+bin/makeiso <template>
+
+  Looks for isolinux.cfg/isolinux.cfg.<template> and copies it to iso_root, then makes an iso.  The is created in
+  /home/www/files/iso and named either <template>.iso or, if '## ISO: Name-To-Be-Used' exists in the template file, uses that
+  instead.
+
+  Example:
+
+  bin/makeiso minimal
+
+  will create /home/www/files/iso/verio-minimal.iso (because isolinux.cfg/isolinux.cfg.minimal has a line that looks like '## ISO:
+  verio-minimal')
+
+  
+bin/mountiso <iso>
+
+  Attempts to mount <iso> at ./mount_<iso>.
+
+bin/updateisoroot <iso> [doit]
+
+  Performs a dry-run rsync from mount_<iso>/ to iso_root/
+
+  Once you are satisfied that things will rsync correctly, call updateisoroot again with 'doit' as the second parameter. The rsync
+  will be run.
+
+bin/umountiso
+
+  Attempts to umount ./mount_<iso>.
+
+
+###
+See the templates in isolinux.cfg for examples of how to setup your own template.

@@ -1,0 +1,243 @@
+#!/bin/bash
+
+function logit {
+  echo "> $@"
+}
+
+function runit {
+  logit "$@"
+  "$@"
+}
+
+export -f logit
+
+if [[ -z $BASE_URL ]]; then
+  logit 'BASE_URL not set, not continuing.'
+  exit 1
+fi
+
+if [[ -z $FILES_URL ]]; then
+  logit 'FILES_URL not set, not continuing'
+  exit 1
+fi
+
+function run_remote  () {
+
+  remote=$1
+
+  logit
+  logit "=============================================================="
+  logit "Running ${remote} ..."
+  logit
+  curl -sS $remote | /bin/bash -s "$@"
+  logit
+  logit "Done running ${remote}."
+  logit "=============================================================="
+  logit
+
+}
+
+export -f run_remote
+
+# Make boot up noisy and set the latest kernel to be the default (non openvz)
+
+function set_boot_kernel () {
+
+  for k in /boot/vmlinuz*
+    do grubby --update-kernel=$k --remove-args='rhgb quiet'
+  done
+
+  grubby --set-default=$(ls -1v /boot/vmlinuz-*$1 | tail -1)
+
+}
+
+export -f set_boot_kernel
+
+function install_file () {
+
+  URL=$1
+  LOC=$2
+
+  logit
+  logit "Installing $(basename $URL) ..."
+
+  FILE_DIR=$(dirname $LOC)
+  if [[ ! -e $FILE_DIR ]]; then
+    runit mkdir -p $FILE_DIR
+
+    if [[ $! -ne 0 ]]; then
+      logit "Error creating $FILE_DIR, not continuing"
+      return
+    fi
+  fi
+
+  if [[ ! -d $FILE_DIR ]]; then
+    logit "$FILE_DIR exists and is not a directory, not continuing"
+    return
+  fi
+
+  if [[ -n $FILE_DIR_CHMOD ]]; then
+    runit chmod $FILE_DIR_CHMOD $FILE_DIR
+  fi
+
+  runit curl -LSso $LOC $URL
+
+  if [[ -n $FILE_CHMOD ]]; then
+    runit chmod $FILE_CHMOD $LOC
+  fi
+
+}
+
+export -f install_file
+
+function install_verify_system () {
+
+  VERIFY_SYSTEM_URL=${VERIFY_SYSTEM_URL:-$FILES_URL/util/verify_system}
+  VERIFY_SYSTEM_LOC=${VERIFY_SYSTEM_LOC:-/root/verify_system}
+  FILE_DIR_CHMOD=
+  FILE_CHMOD=0700
+
+  install_file $VERIFY_SYSTEM_URL $VERIFY_SYSTEM_LOC
+
+}
+
+export -f install_verify_system
+
+function install_perlbrew_script () {
+
+  INSTALL_PERLBREW_URL=${INSTALL_PERLBREW_URL:-$KS_FILES_URL/util/install_perlbrew}
+  INSTALL_PERLBREW_LOC=${INSTALL_PERLBREW_LOC:-/root/install_perlbrew}
+  FILE_DIR_CHMOD=
+  FILE_CHMOD=0700
+
+  install_file $INSTALL_PERLBREW_URL $INSTALL_PERLBREW_LOC
+
+}
+
+export -f install_perlbrew_script
+
+function install_repos_script () {
+
+  INSTALL_REPOS_URL=${INSTALL_REPOS_URL:-$KS_FILES_URL/util/install_repos}
+  INSTALL_REPOS_LOC=${INSTALL_REPOS_LOC:-/root/install_repos}
+  FILE_DIR_CHMOD=
+  FILE_CHMOD=0700
+
+  install_file $INSTALL_REPOS_URL $INSTALL_REPOS_LOC
+
+}
+
+export -f install_repos_script
+
+function install_auth_keys () {
+
+  AUTH_KEYS='authorized_keys'
+  AUTH_KEYS_URL=${AUTH_KEYS_URL:-$FILES_URL/dotfiles/$AUTH_KEYS}
+  AUTH_KEYS_LOC=${AUTH_KEYS_LOC:-/root/.ssh/$(basename $AUTH_KEYS_URL)}
+  FILE_DIR_CHMOD=0700
+  FILE_CHMOD=0644
+
+  install_file $AUTH_KEYS_URL $AUTH_KEYS_LOC
+
+}
+
+export -f install_auth_keys
+
+function install_bash_dotfiles () {
+
+  BASHRC_URL=${BASHRC_URL:-$FILES_URL/dotfiles/bashrc}
+  BASHRC_LOC=${BASHRC_LOC:-/root/.bashrc}
+  FILE_DIR_CHMOD=
+  FILE_CHMOD=0655
+
+  install_file $BASHRC_URL $BASHRC_LOC
+
+}
+
+export -f install_bash_dotfiles
+
+function install_packages () {
+
+  logit
+
+  if [[ -z $PKGS ]]; then
+    logit "PKGS not set, nothing to do."
+    return
+  fi
+
+  runit yum -y --skip-broken install $PKGS
+
+}
+
+export -f install_packages
+
+function fix_ifcfg () {
+
+  logit
+
+  net_scripts='/etc/sysconfig/network-scripts'
+
+  for link in $(ls /sys/class/net | grep -v lo); do
+
+    link_path="${net_scripts}/ifcfg-$(basename $link)"
+
+    logit "Fix ${link_path} ..."
+    perl -pi -e 's/^((?:HWADDR|UUID|GATEWAY)=.*)$/#$1/' $link_path
+
+  done
+}
+
+export -f fix_ifcfg
+
+function fix_udev () {
+
+  logit
+
+  persist_net='/etc/udev/rules.d/70-persistent-net.rules'
+
+  if [[ -e $persist_net ]]; then
+
+    logit 'Fix udev net rules ...'
+    perl -pi -e 's/(ATTR{address}==")[^"]*"/$1*"/' $persist_net
+
+  fi
+}
+
+export -f fix_udev
+
+function post_install () {
+
+  logit "Starting post install steps ..."
+
+  install_auth_keys
+  install_bash_dotfiles
+  install_perlbrew_script
+  install_repos_script
+  install_verify_system
+
+  install_packages
+
+  fix_ifcfg
+  fix_udev
+  set_boot_kernel
+
+  logit 'Remove selinux directory ...'
+  runit rm -rf /etc/selinux/targeted
+
+  logit 'Remove unneeded firmware packages ...'
+  firmware=$(rpm -qa \*firmware\* | grep -Ev 'kernel|linux')
+
+  if [[ -n $firmware ]]; then
+    runit rpm -e $firmware
+  fi
+
+  logit 'Update ... for some reason not all the latest files are chosen during the initial install ...'
+  runit yum -y --skip-broken update
+
+  logit 'Some yum cache cleanup ...'
+  runit yum clean expire-cache
+  runit yum clean all
+
+}
+
+export -f post_install

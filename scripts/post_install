@@ -1,0 +1,61 @@
+#!/bin/bash
+
+# XXX: Is this still a concern?
+if curl -Ss --head http://vr.vwh.net > /dev/null; then
+  echo "We can see vr.vwh.net, not doing anything."
+else
+  echo "We can't see vr.vwh.net, point to the internal ip."
+  HOST='10.1.253.113'
+  echo "${HOST} vr.vwh.net" >> /etc/hosts
+fi
+
+#echo Update ... for some reason not all the latest files are chosen during the initial install ...
+#yum -y --skip-broken update
+#
+#echo Remove unneeded packages and directories ...
+#firmware=$(rpm -qa \*firmware | grep -v kernel)
+#if [[ -n $firmware ]]; then
+#  rpm -e $firmware
+#fi
+#
+#echo Remove selinux directory
+#rm -rf /etc/selinux/targeted
+
+# Add custom files
+BASHRC="${FILES_URL}/dotfiles/bashrc"
+curl -SsLo /root/.bashrc $BASHRC
+
+echo "Verify system -- probably unnecessary, but it shouldn't hurt and may catch some things up front ..."
+
+for p in $(rpm -qa --qf '%{name}\n'); do
+
+  v=$(rpm -Va $p | grep '^missing    ')
+
+  if [ -n "$v" ]; then
+
+    yum -q -y reinstall $p
+
+  fi
+done
+
+#This is causing the followup scripts to not be run, so run verify_system on
+#reboot.
+#echo Prelinking binaries ...
+#prelink -avmR
+
+echo package-cleanup --leaves
+/usr/bin/package-cleanup --leaves
+
+echo package-cleanup --orphans
+/usr/bin/package-cleanup --orphans
+
+echo package-cleanup --problems
+/usr/bin/package-cleanup --problems
+
+echo package-cleanup --dupes
+/usr/bin/package-cleanup --dupes
+
+#echo Some yum cache cleanup ...
+#yum clean expire-cache
+#yum clean all
+
