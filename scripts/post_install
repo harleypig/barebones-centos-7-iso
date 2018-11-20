@@ -1,5 +1,6 @@
 #!/bin/bash
 
+#=============================================================================
 # XXX: Is this still a concern?
 if curl -Ss --head http://vr.vwh.net > /dev/null; then
   echo "We can see vr.vwh.net, not doing anything."
@@ -9,6 +10,7 @@ else
   echo "${HOST} vr.vwh.net" >> /etc/hosts
 fi
 
+#=============================================================================
 #echo Update ... for some reason not all the latest files are chosen during the initial install ...
 #yum -y --skip-broken update
 #
@@ -21,10 +23,12 @@ fi
 #echo Remove selinux directory
 #rm -rf /etc/selinux/targeted
 
+#=============================================================================
 # Add custom files
 BASHRC="${FILES_URL}/dotfiles/bashrc"
 curl -SsLo /root/.bashrc $BASHRC
 
+#=============================================================================
 echo "Verify system -- probably unnecessary, but it shouldn't hurt and may catch some things up front ..."
 
 for p in $(rpm -qa --qf '%{name}\n'); do
@@ -38,11 +42,13 @@ for p in $(rpm -qa --qf '%{name}\n'); do
   fi
 done
 
+#=============================================================================
 #This is causing the followup scripts to not be run, so run verify_system on
 #reboot.
 #echo Prelinking binaries ...
 #prelink -avmR
 
+#=============================================================================
 echo package-cleanup --leaves
 /usr/bin/package-cleanup --leaves
 
@@ -58,4 +64,3 @@ echo package-cleanup --dupes
 #echo Some yum cache cleanup ...
 #yum clean expire-cache
 #yum clean all
-

@@ -1,213 +1,205 @@
 #!/bin/bash
 
-function logit {
-  echo "> $@"
+#=============================================================================
+# Function definitions
+
+warn() { printf '%s\n' "$*" >&2; }
+
+die() {
+  (($#)) && warn "$*"
+  exit 1
 }
 
-function runit {
-  logit "$@"
-  "$@"
+runit() {
+  local rc=0
+  warn "$@"
+  "$@" || {
+    rc=$?
+    warn "Problem running cmd (rc: $rc)"
+  }
+
+  return $rc
 }
 
-export -f logit
+[[ -z $BASE_URL ]] && die 'BASE_URL not set, not continuing.'
+[[ -z $FILES_URL ]] && die 'FILES_URL not set, not continuing'
 
-if [[ -z $BASE_URL ]]; then
-  logit 'BASE_URL not set, not continuing.'
-  exit 1
-fi
-
-if [[ -z $FILES_URL ]]; then
-  logit 'FILES_URL not set, not continuing'
-  exit 1
-fi
-
-function run_remote  () {
-
+#-----------------------------------------------------------------------------
+run_remote() {
   remote=$1
 
-  logit
-  logit "=============================================================="
-  logit "Running ${remote} ..."
-  logit
-  curl -sS $remote | /bin/bash -s "$@"
-  logit
-  logit "Done running ${remote}."
-  logit "=============================================================="
-  logit
+  warn "
+==============================================================
+Running $remote ...
+"
 
+  # Download text from 'remote' and have bash execute it.
+  curl -sS "$remote" | /bin/bash -s "$@"
+
+  warn "
+Done running $remote.
+=============================================================="
 }
 
-export -f run_remote
+#export -f run_remote
 
+#-----------------------------------------------------------------------------
 # Make boot up noisy and set the latest kernel to be the default (non openvz)
 
-function set_boot_kernel () {
+# shellcheck disable=2120
+set_boot_kernel() {
+  local k
 
-  for k in /boot/vmlinuz*
-    do grubby --update-kernel=$k --remove-args='rhgb quiet'
+  for k in /boot/vmlinuz*; do
+    grubby --update-kernel="$k" --remove-args='rhgb quiet'
   done
 
-  grubby --set-default=$(ls -1v /boot/vmlinuz-*$1 | tail -1)
+  # ls -v sorts by 'natural' version numbers in the name. We want the last, or
+  # latest, version of the kernel.
 
+  # NOTE: find | sort -V  might work here.
+
+  # shellcheck disable=SC2012
+  grubby --set-default="$(ls -1v "/boot/vmlinuz-*$1" | tail -1)"
 }
 
-export -f set_boot_kernel
+#export -f set_boot_kernel
 
-function install_file () {
+#-----------------------------------------------------------------------------
+install_file() {
+  local URL=$1
+  local LOC=$2
 
-  URL=$1
-  LOC=$2
+  warn "Installing $(basename "$URL") ..."
 
-  logit
-  logit "Installing $(basename $URL) ..."
+  local FILE_DIR
+  FILE_DIR=$(dirname "$LOC")
 
-  FILE_DIR=$(dirname $LOC)
-  if [[ ! -e $FILE_DIR ]]; then
-    runit mkdir -p $FILE_DIR
+  [[ -e $FILE_DIR ]] || runit mkdir -p "$FILE_DIR" || return
 
-    if [[ $! -ne 0 ]]; then
-      logit "Error creating $FILE_DIR, not continuing"
-      return
-    fi
-  fi
+  [[ -d $FILE_DIR ]] || {
+    warn "$FILE_DIR exists and is not a directory, not continuing"
+    return 1
+  }
 
-  if [[ ! -d $FILE_DIR ]]; then
-    logit "$FILE_DIR exists and is not a directory, not continuing"
-    return
-  fi
+  [[ -n $FILE_DIR_CHMOD ]] && runit chmod "$FILE_DIR_CHMOD" "$FILE_DIR" || return
 
-  if [[ -n $FILE_DIR_CHMOD ]]; then
-    runit chmod $FILE_DIR_CHMOD $FILE_DIR
-  fi
+  runit curl -LSso "$LOC" "$URL" || return
 
-  runit curl -LSso $LOC $URL
+  [[ -n $FILE_CHMOD ]] && runit chmod "$FILE_CHMOD" "$LOC" || return
 
-  if [[ -n $FILE_CHMOD ]]; then
-    runit chmod $FILE_CHMOD $LOC
-  fi
-
+  return 0
 }
 
-export -f install_file
+#export -f install_file
 
-function install_verify_system () {
+#-----------------------------------------------------------------------------
+install_verify_system() {
+  local VERIFY_SYSTEM_URL=${VERIFY_SYSTEM_URL:-$FILES_URL/util/verify_system}
+  local VERIFY_SYSTEM_LOC=${VERIFY_SYSTEM_LOC:-/root/verify_system}
+  local FILE_DIR_CHMOD=
+  local FILE_CHMOD=0700
 
-  VERIFY_SYSTEM_URL=${VERIFY_SYSTEM_URL:-$FILES_URL/util/verify_system}
-  VERIFY_SYSTEM_LOC=${VERIFY_SYSTEM_LOC:-/root/verify_system}
-  FILE_DIR_CHMOD=
-  FILE_CHMOD=0700
-
-  install_file $VERIFY_SYSTEM_URL $VERIFY_SYSTEM_LOC
-
+  install_file "$VERIFY_SYSTEM_URL" "$VERIFY_SYSTEM_LOC"
 }
 
-export -f install_verify_system
+#export -f install_verify_system
 
-function install_perlbrew_script () {
+#-----------------------------------------------------------------------------
+install_perlbrew_script() {
+  local INSTALL_PERLBREW_URL=${INSTALL_PERLBREW_URL:-$KS_FILES_URL/util/install_perlbrew}
+  local INSTALL_PERLBREW_LOC=${INSTALL_PERLBREW_LOC:-/root/install_perlbrew}
+  local FILE_DIR_CHMOD=
+  local FILE_CHMOD=0700
 
-  INSTALL_PERLBREW_URL=${INSTALL_PERLBREW_URL:-$KS_FILES_URL/util/install_perlbrew}
-  INSTALL_PERLBREW_LOC=${INSTALL_PERLBREW_LOC:-/root/install_perlbrew}
-  FILE_DIR_CHMOD=
-  FILE_CHMOD=0700
-
-  install_file $INSTALL_PERLBREW_URL $INSTALL_PERLBREW_LOC
-
+  install_file "$INSTALL_PERLBREW_URL" "$INSTALL_PERLBREW_LOC"
 }
 
-export -f install_perlbrew_script
+#export -f install_perlbrew_script
 
-function install_repos_script () {
+#-----------------------------------------------------------------------------
+install_repos_script() {
+  local INSTALL_REPOS_URL=${INSTALL_REPOS_URL:-$KS_FILES_URL/util/install_repos}
+  local INSTALL_REPOS_LOC=${INSTALL_REPOS_LOC:-/root/install_repos}
+  local FILE_DIR_CHMOD=
+  local FILE_CHMOD=0700
 
-  INSTALL_REPOS_URL=${INSTALL_REPOS_URL:-$KS_FILES_URL/util/install_repos}
-  INSTALL_REPOS_LOC=${INSTALL_REPOS_LOC:-/root/install_repos}
-  FILE_DIR_CHMOD=
-  FILE_CHMOD=0700
-
-  install_file $INSTALL_REPOS_URL $INSTALL_REPOS_LOC
-
+  install_file "$INSTALL_REPOS_URL" "$INSTALL_REPOS_LOC"
 }
 
-export -f install_repos_script
+#export -f install_repos_script
 
-function install_auth_keys () {
+#-----------------------------------------------------------------------------
+install_auth_keys() {
+  local AUTH_KEYS='authorized_keys'
+  local AUTH_KEYS_URL=${AUTH_KEYS_URL:-$FILES_URL/dotfiles/$AUTH_KEYS}
+  local AUTH_KEYS_LOC=${AUTH_KEYS_LOC:-/root/.ssh/$(basename "$AUTH_KEYS_URL")}
+  local FILE_DIR_CHMOD=0700
+  local FILE_CHMOD=0644
 
-  AUTH_KEYS='authorized_keys'
-  AUTH_KEYS_URL=${AUTH_KEYS_URL:-$FILES_URL/dotfiles/$AUTH_KEYS}
-  AUTH_KEYS_LOC=${AUTH_KEYS_LOC:-/root/.ssh/$(basename $AUTH_KEYS_URL)}
-  FILE_DIR_CHMOD=0700
-  FILE_CHMOD=0644
-
-  install_file $AUTH_KEYS_URL $AUTH_KEYS_LOC
-
+  install_file "$AUTH_KEYS_URL" "$AUTH_KEYS_LOC"
 }
 
-export -f install_auth_keys
+#export -f install_auth_keys
 
-function install_bash_dotfiles () {
+#-----------------------------------------------------------------------------
+install_bash_dotfiles() {
+  local BASHRC_URL=${BASHRC_URL:-$FILES_URL/dotfiles/bashrc}
+  local BASHRC_LOC=${BASHRC_LOC:-/root/.bashrc}
+  local FILE_DIR_CHMOD=
+  local FILE_CHMOD=0655
 
-  BASHRC_URL=${BASHRC_URL:-$FILES_URL/dotfiles/bashrc}
-  BASHRC_LOC=${BASHRC_LOC:-/root/.bashrc}
-  FILE_DIR_CHMOD=
-  FILE_CHMOD=0655
-
-  install_file $BASHRC_URL $BASHRC_LOC
-
+  install_file "$BASHRC_URL" "$BASHRC_LOC"
 }
 
-export -f install_bash_dotfiles
+#export -f install_bash_dotfiles
 
-function install_packages () {
+#-----------------------------------------------------------------------------
+install_packages() {
+  [[ -z $PKGS ]] && {
+    warn "PKGS not set, nothing to do."
+    return 1
+  }
 
-  logit
-
-  if [[ -z $PKGS ]]; then
-    logit "PKGS not set, nothing to do."
-    return
-  fi
-
-  runit yum -y --skip-broken install $PKGS
-
+  runit yum -y --skip-broken install "$PKGS"
 }
 
-export -f install_packages
+#export -f install_packages
 
-function fix_ifcfg () {
-
-  logit
-
+#-----------------------------------------------------------------------------
+fix_ifcfg() {
   net_scripts='/etc/sysconfig/network-scripts'
 
-  for link in $(ls /sys/class/net | grep -v lo); do
+  readarray -t links < <(find /sys/class/net)
 
-    link_path="${net_scripts}/ifcfg-$(basename $link)"
+  #for link in $(ls /sys/class/net | grep -v lo); do
+  for link in "${links[@]}"; do
+    [[ $link == 'lo' ]] && continue
 
-    logit "Fix ${link_path} ..."
-    perl -pi -e 's/^((?:HWADDR|UUID|GATEWAY)=.*)$/#$1/' $link_path
+    link_path="${net_scripts}/ifcfg-$(basename "$link")"
 
+    warn "Fix $link_path ..."
+    runit perl -pi -e 's/^((?:HWADDR|UUID|GATEWAY)=.*)$/#$1/' "$link_path"
   done
 }
 
-export -f fix_ifcfg
+#export -f fix_ifcfg
 
-function fix_udev () {
-
-  logit
-
+#-----------------------------------------------------------------------------
+fix_udev() {
   persist_net='/etc/udev/rules.d/70-persistent-net.rules'
 
   if [[ -e $persist_net ]]; then
-
-    logit 'Fix udev net rules ...'
-    perl -pi -e 's/(ATTR{address}==")[^"]*"/$1*"/' $persist_net
-
+    warn 'Fix udev net rules ...'
+    runit perl -pi -e 's/(ATTR{address}==")[^"]*"/$1*"/' $persist_net
   fi
 }
 
-export -f fix_udev
+#export -f fix_udev
 
-function post_install () {
-
-  logit "Starting post install steps ..."
+#-----------------------------------------------------------------------------
+post_install() {
+  warn "Starting post install steps ..."
 
   install_auth_keys
   install_bash_dotfiles
@@ -219,25 +211,22 @@ function post_install () {
 
   fix_ifcfg
   fix_udev
-  set_boot_kernel
+  set_boot_kernel "$1"
 
-  logit 'Remove selinux directory ...'
+  warn 'Remove selinux directory ...'
   runit rm -rf /etc/selinux/targeted
 
-  logit 'Remove unneeded firmware packages ...'
+  warn 'Remove unneeded firmware packages ...'
   firmware=$(rpm -qa \*firmware\* | grep -Ev 'kernel|linux')
 
-  if [[ -n $firmware ]]; then
-    runit rpm -e $firmware
-  fi
+  [[ -n $firmware ]] && runit rpm -e "$firmware" || return
 
-  logit 'Update ... for some reason not all the latest files are chosen during the initial install ...'
+  warn 'Update ... for some reason not all the latest files are chosen during the initial install ...'
   runit yum -y --skip-broken update
 
-  logit 'Some yum cache cleanup ...'
+  warn 'Some yum cache cleanup ...'
   runit yum clean expire-cache
   runit yum clean all
-
 }
 
-export -f post_install
+#export -f post_install
